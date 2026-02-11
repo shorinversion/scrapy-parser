@@ -1,5 +1,5 @@
 import scrapy
-import re
+from movie_parser.items import MovieParserItem
 
 
 class MoviesSpider(scrapy.Spider):
@@ -14,119 +14,49 @@ class MoviesSpider(scrapy.Spider):
             '//*[@id="mw-pages"]//div[@class="mw-category-group"]//a/@href'
         ).getall()
 
-        count = 0
         for movie_link in movie_links:
             yield response.follow(movie_link, callback=self.parse_movie)
-            count += 1
-            if count == 50:
-                break
 
-        # test_link = ""
+        next_page = response.xpath(
+            '//a[contains(text(), "Следующая страница")]/@href'
+        ).get()
 
-        # yield response.follow(test_link, callback=self.parse_movie)
+        if next_page:
+            next_page = response.urljoin(next_page)
+            yield response.follow(next_page, callback=self.parse)
 
     def parse_movie(self, response):
-        title = ""
-        genre = ""
-        director = ""
-        country = ""
-        year = ""
-        imdb = ""
+        item = MovieParserItem()
 
-        title = (
-            response.xpath('//*[@class="infobox-above"]/text()')
-            .get()
-            .replace("\xa0", " ")
-        )
+        # Title
+        item["title"] = response.xpath(
+            '//*[@class="infobox-above"]/text()[normalize-space()] | '
+            '//*[@class="infobox-above"]//span/text()'
+        ).get()
 
-        genres = response.xpath(
+        # Genre
+        item["genre"] = response.xpath(
             '//th[contains(., "Жанр")]/following-sibling::td//text()'
         ).getall()
 
-        if genres:
-
-            genres = [i.strip() for i in genres if i.strip()]
-            genres = [
-                i for i in genres if i and i not in [",", "[", "]", "(", ")", "/"]
-            ]
-            genres = [i for i in genres if not i.isdigit()]
-            genres = [i.lower() for i in genres]
-            genres = [i for i in genres if i != "и" and i != "[вд]"]
-
-            processed_genres = []
-            i = 0
-            while i < len(genres):
-                if genres[i] == "-":
-                    left = processed_genres.pop()
-                    right = genres[i + 1]
-                    processed_genres.append(f"{left}-{right}")
-                    i += 2
-                else:
-                    processed_genres.append(genres[i])
-                    i += 1
-
-            if (
-                processed_genres[0].endswith("ая")
-                or processed_genres[0].endswith("ий")
-                or processed_genres[0].endswith("ое")
-            ):
-                processed_genres = " ".join(processed_genres)
-            else:
-                processed_genres = processed_genres[0]
-
-            genre = processed_genres
-
-            if "," in genre:
-                genre = genre.split(",")[0]
-
-            genre = " ".join(genre.split(" ")[0:2])
-
+        # Director
         director = response.xpath(
-            '//th[contains(text(), "Режиссёр")]/following-sibling::td//a/text()'
-        ).get()
+            '//th[contains(text(), "Режиссёр")]/following-sibling::td//text()'
+        ).getall()
 
-        if director is None:
-            director = response.xpath(
-                '//th[contains(text(), "Режиссёр")]/following-sibling::td//span/text()'
-            ).get()
+        item["director"] = director
 
-        countries = response.xpath(
+        # Country
+        item["country"] = response.xpath(
             '//th[contains(text(), "Стран")]/following-sibling::td//text()'
         ).getall()
 
-        if countries:
-            countries = [i.strip() for i in countries if i.strip()]
-            countries = [
-                i for i in countries if i and i not in [",", "[", "]", "(", ")"]
-            ]
-            countries = [i for i in countries if not i.isdigit()]
-            if countries:
-                country = countries[0]
-
-        years = response.xpath(
-            '//th[contains(text(), "Год") or contains(text(), "Дата")]/following-sibling::td//text()'
+        # Year
+        item["year"] = response.xpath(
+            '//th[contains(text(), "Год") or contains(text(), "Дата") or contains(text(), "Первый показ")]/following-sibling::td//text()'
         ).getall()
 
-        if years:
-            valid_years = []
-            for y in years:
-                years_found = re.findall(r"\d{4}", y)
-                valid_years.extend(years_found)
+        # IMDb
+        item["imdb"] = response.xpath('//a[contains(@title, "imdbtitle")]/@title').get()
 
-            if valid_years:
-                year = valid_years[0]
-
-        imdb = response.xpath('//a[contains(@title, "imdbtitle")]/@title').get()
-
-        if imdb:
-            imdb = imdb.split(":")[-1]
-
-        yield {
-            "url": response.url,
-            "title": title,
-            "genre": genre,
-            "director": director,
-            "country": country,
-            "year": year,
-            "imdb": imdb,
-        }
+        yield item
